@@ -2,4 +2,4 @@ fastapi
 uvicorn
 yfinance
 httpx
-fear_and_greed
+fear-and-greed
