@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import yfinance as yf
 import httpx
+from datetime import datetime
 import xml.etree.ElementTree as ET
 import fear_and_greed
 
@@ -33,41 +34,39 @@ def get_vix():
 
 @app.get("/fear-greed")
 async def get_fear_greed():
-    url = "https://production.dataviz.cnn.io/index/feargreed/graphdata"
+    # Note the "and" in the URL: fearandgreed
+    url = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
+    
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
         "Origin": "https://www.cnn.com",
         "Referer": "https://www.cnn.com/markets/fear-and-greed"
     }
 
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+            # If the base URL 404s, try appending today's date
+            # resp = await client.get(f"{url}/{datetime.now().strftime('%Y-%m-%d')}", headers=headers)
             resp = await client.get(url, headers=headers)
+            
+            if resp.status_code == 404:
+                # Fallback to date-specific endpoint if generic one fails
+                date_url = f"{url}/{datetime.now().strftime('%Y-%m-%d')}"
+                resp = await client.get(date_url, headers=headers)
+            
             resp.raise_for_status()
             data = resp.json()
 
-            # The API returns a "fear_and_greed" object with current and historical data
             current_data = data.get("fear_and_greed", {})
-            current_val = round(current_data.get("score", 0))
-            current_label = current_data.get("rating", "Unknown").capitalize()
-
-            # Get historical for "previous value" (yesterday's close)
-            # The "fear_and_greed_historical" list contains past data points
-            hist_list = data.get("fear_and_greed_historical", {}).get("data", [])
-            prev_val = round(hist_list[-2]["y"]) if len(hist_list) >= 2 else current_val
-
             return {
-                "value": current_val,
-                "prev_value": prev_val,
-                "label": current_label,
+                "value": round(current_data.get("score", 0)),
+                "label": current_data.get("rating", "Neutral").capitalize(),
+                "timestamp": current_data.get("timestamp"),
+                "previous_close": round(data.get("fear_and_greed_historical", {}).get("data", [])[-2]['y']) 
+                                  if len(data.get("fear_and_greed_historical", {}).get("data", [])) > 1 else None
             }
     except Exception as e:
-        return {
-            "value": None,
-            "prev_value": None,
-            "label": "Unavailable",
-            "error": f"CNN API Error: {str(e)}",
-        }
+        return {"error": f"CNN API Error: {str(e)}", "value": None, "label": "Unavailable"}
 
 # ── CNBC Live News (RSS) ──────────────────────────────────────────────────────
 
