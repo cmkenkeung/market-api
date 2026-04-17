@@ -32,29 +32,41 @@ def get_vix():
 # ── Fear & Greed ──────────────────────────────────────────────────────────────
 
 @app.get("/fear-greed")
-def get_fear_greed():
+async def get_fear_greed():
+    url = "https://production.dataviz.cnn.io/index/feargreed/graphdata"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Origin": "https://www.cnn.com",
+        "Referer": "https://www.cnn.com/markets/fear-and-greed"
+    }
+
     try:
-        # Fetch current value
-        current_data = fear_and_greed.get()
-        current_val  = round(current_data.value)
-        current_label = current_data.description  # e.g. "Fear", "Greed", "Extreme Fear"
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(url, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
 
-        # Fetch historical to get yesterday's value
-        hist_data    = fear_and_greed.get_historical_fng(limit=2)
-        # hist_data is a list of dicts: [{"value": ..., "value_classification": ..., "timestamp": ...}, ...]
-        prev_val     = round(float(hist_data[1]["value"])) if len(hist_data) >= 2 else current_val
+            # The API returns a "fear_and_greed" object with current and historical data
+            current_data = data.get("fear_and_greed", {})
+            current_val = round(current_data.get("score", 0))
+            current_label = current_data.get("rating", "Unknown").capitalize()
 
-        return {
-            "value":      current_val,
-            "prev_value": prev_val,
-            "label":      current_label,
-        }
+            # Get historical for "previous value" (yesterday's close)
+            # The "fear_and_greed_historical" list contains past data points
+            hist_list = data.get("fear_and_greed_historical", {}).get("data", [])
+            prev_val = round(hist_list[-2]["y"]) if len(hist_list) >= 2 else current_val
+
+            return {
+                "value": current_val,
+                "prev_value": prev_val,
+                "label": current_label,
+            }
     except Exception as e:
         return {
-            "value":      None,
+            "value": None,
             "prev_value": None,
-            "label":      "Unavailable",
-            "error":      str(e),
+            "label": "Unavailable",
+            "error": f"CNN API Error: {str(e)}",
         }
 
 # ── CNBC Live News (RSS) ──────────────────────────────────────────────────────
